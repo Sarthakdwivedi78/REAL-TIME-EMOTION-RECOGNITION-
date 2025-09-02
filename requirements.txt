@@ -5,3 +5,4 @@ opencv-python-headless
 tensorflow==2.8.0
 Pillow
 requests
+protobuf==3.20.0
