@@ -3,260 +3,269 @@ import cv2
 import numpy as np
 import os
 from PIL import Image
-import requests
+import io
 import pandas as pd
+from collections import Counter
 
-# --- Page Configuration ---
+# ✅ Configure Streamlit page (must be first Streamlit call)
 st.set_page_config(
-    page_title="Emotion Recognition App",
+    page_title="Emotion Detection App",
     page_icon="😊",
     layout="wide"
 )
 
-# --- Custom CSS for Styling ---
-def local_css(file_name):
-    with open(file_name) as f:
-        st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
-
-# You would need to create a style.css file for this to work
-# As a fallback, I will embed the CSS directly.
-st.markdown("""
-<style>
-    /* General Styling */
-    body {
-        background-color: #1a1a2e;
-        color: #e0e0e0;
-    }
-    .main {
-        background: linear-gradient(135deg, #16222A 0%, #3A6073 100%);
-        padding: 2rem;
-        border-radius: 15px;
-    }
-    h1, h2, h3 {
-        color: #ffffff;
-        font-weight: 600;
-    }
-    .stButton>button {
-        background-color: #007bff;
-        color: white;
-        border-radius: 20px;
-        padding: 10px 20px;
-        border: none;
-        transition: background-color 0.3s ease;
-    }
-    .stButton>button:hover {
-        background-color: #0056b3;
-    }
-    .stFileUploader, .stSelectbox, .stNumberInput {
-        border-radius: 10px;
-    }
-    /* Custom Components */
-    .emotion-badge {
-        display: inline-block;
-        padding: 0.5em 0.9em;
-        font-size: 0.9em;
-        font-weight: 700;
-        line-height: 1;
-        text-align: center;
-        white-space: nowrap;
-        vertical-align: baseline;
-        border-radius: 0.75rem;
-        color: #fff;
-        margin-right: 5px;
-    }
-    footer {
-        text-align: center;
-        padding: 1rem;
-        color: #a0a0a0;
-        font-size: 0.9rem;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-
-# --- Model and Classifier Loading ---
-# NEW, WORKING MODEL URL
-MODEL_URL = "https://github.com/git-chin/fer2013/raw/main/model.h5"
-MODEL_PATH = "emotion_model.h5"
-FACE_CLASSIFIER_PATH = 'haarcascade_frontalface_default.xml'
-
-@st.cache_data
-def download_file(url, file_path):
-    """Downloads a file from a URL and saves it locally."""
-    if not os.path.exists(file_path):
-        with st.spinner(f"Downloading {os.path.basename(file_path)}... This may take a moment."):
-            try:
-                r = requests.get(url, stream=True)
-                r.raise_for_status()
-                with open(file_path, 'wb') as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                st.success(f"✅ {os.path.basename(file_path)} downloaded successfully!")
-            except requests.exceptions.RequestException as e:
-                st.error(f"❌ Error downloading file: {e}")
-                return False
-    return True
-
-@st.cache_resource
-def load_emotion_model():
-    """Loads the emotion detection model from the local file."""
-    if not download_file(MODEL_URL, MODEL_PATH):
-        return None
-    try:
-        import tensorflow as tf
-        model = tf.keras.models.load_model(MODEL_PATH, compile=False)
-        st.success("✅ Emotion model loaded successfully!")
-        return model
-    except Exception as e:
-        st.error(f"❌ Error loading model file: {e}")
-        st.info("The model file might be incompatible. Please ensure it was trained with a compatible TensorFlow version.")
-        return None
-
-@st.cache_resource
-def load_face_classifier():
-    """Loads the Haar Cascade face classifier."""
-    if not os.path.exists(FACE_CLASSIFIER_PATH):
-        st.error(f"Face classifier file '{FACE_CLASSIFIER_PATH}' not found.")
-        return None
-    return cv2.CascadeClassifier(FACE_CLASSIFIER_PATH)
-
-# --- Core Emotion Detection Logic ---
-# UPDATED for the new model's requirements (48x48 grayscale)
-EMOTION_LABELS = ['Angry', 'Disgust', 'Fear', 'Happy', 'Neutral', 'Sad', 'Surprise']
+# --- Color and Style Definitions ---
 EMOTION_COLORS = {
-    'Angry': '#d32f2f', 'Disgust': '#7b1fa2', 'Fear': '#f57c00', 'Happy': '#388e3c',
-    'Neutral': '#757575', 'Sad': '#1976d2', 'Surprise': '#fbc02d'
+    "Happy": "#4CAF50",      # Green
+    "Sad": "#2196F3",        # Blue
+    "Angry": "#F44336",      # Red
+    "Surprise": "#FFC107",   # Amber
+    "Neutral": "#9E9E9E",    # Grey
+    "Fear": "#673AB7",       # Deep Purple
+    "Disgust": "#795548"     # Brown
 }
 
-def detect_emotions(image, model, face_classifier):
-    """Detects faces and predicts emotions for each face found in an image."""
-    if isinstance(image, Image.Image):
-        image = np.array(image)
+def load_css():
+    """Injects custom CSS for styling the app."""
+    st.markdown("""
+        <style>
+            /* Main app background */
+            .stApp {
+                background-image: linear-gradient(to top right, #0a071d, #1f1a3e, #3a2f6b);
+                background-attachment: fixed;
+                color: #e0e0e0;
+            }
+            /* Sidebar styling */
+            [data-testid="stSidebar"] {
+                background-color: rgba(10, 7, 29, 0.8);
+                border-right: 1px solid #4a3f8a;
+            }
+            /* Headers and titles */
+            h1, h2, h3 {
+                color: #a79aff; /* A nice lavender color for headers */
+            }
+            /* Custom emotion badges */
+            .emotion-badge {
+                padding: 5px 15px;
+                border-radius: 20px;
+                color: white;
+                font-weight: bold;
+                display: inline-block;
+                margin-bottom: 10px;
+                font-size: 1.1em;
+            }
+            /* Footer styling */
+            .footer {
+                position: fixed;
+                left: 0;
+                bottom: 0;
+                width: 100%;
+                background-color: rgba(10, 7, 29, 0.8);
+                color: #a79aff;
+                text-align: center;
+                padding: 10px;
+                font-size: 0.9em;
+            }
+        </style>
+    """, unsafe_allow_html=True)
 
-    if image.dtype != np.uint8:
-        image = (255 * (image / np.max(image))).astype(np.uint8)
+# --- TensorFlow Import and Setup ---
+TF_AVAILABLE = False
+try:
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+    import tensorflow as tf
+    from tensorflow.keras.preprocessing.image import img_to_array
+    TF_AVAILABLE = True
+except ImportError:
+    pass # Errors will be handled gracefully in main app logic
 
-    if len(image.shape) > 2 and image.shape[2] == 4: # Handle RGBA
-        image = cv2.cvtColor(image, cv2.COLOR_RGBA2RGB)
+# --- Model Loading ---
+@st.cache_resource
+def load_model():
+    if not TF_AVAILABLE: return None
+    model_paths = ['emotion_model.h5', 'Custom_CNN_model.keras']
+    for model_path in model_paths:
+        if os.path.exists(model_path):
+            try:
+                model = tf.keras.models.load_model(model_path, compile=False)
+                return model
+            except Exception:
+                continue
+    return None
 
-    gray_image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-    color_image = image.copy()
+def create_fallback_model():
+    if not TF_AVAILABLE: return None
+    model = tf.keras.Sequential([
+        tf.keras.layers.Conv2D(32, (3, 3), activation='relu', input_shape=(224, 224, 3)),
+        tf.keras.layers.MaxPooling2D(2, 2), tf.keras.layers.Flatten(),
+        tf.keras.layers.Dense(128, activation='relu'), tf.keras.layers.Dense(7, activation='softmax')
+    ])
+    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    return model
 
-    faces = face_classifier.detectMultiScale(
-        gray_image, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30)
-    )
+# --- Face Classifier Loading ---
+@st.cache_resource
+def load_face_classifier():
+    classifier_path = 'haarcascade_frontalface_default.xml'
+    if not os.path.exists(classifier_path): return None
+    return cv2.CascadeClassifier(classifier_path)
 
+# --- Emotion Detection Logic ---
+emotion_labels = ['Angry', 'Disgust', 'Fear', 'Happy', 'Neutral', 'Sad', 'Surprise']
+
+def detect_emotion(image, model, face_classifier, scale_factor, min_neighbors):
+    if model is None or face_classifier is None: return np.array(image), []
+    if isinstance(image, Image.Image): image = np.array(image.convert('RGB'))
+    processed_image, gray = image.copy(), cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    faces = face_classifier.detectMultiScale(gray, scaleFactor=scale_factor, minNeighbors=min_neighbors, minSize=(40, 40))
     results = []
     for (x, y, w, h) in faces:
-        # Preprocess the face for the new model (48x48 grayscale)
-        face_roi = gray_image[y:y+h, x:x+w]
-        resized_face = cv2.resize(face_roi, (48, 48), interpolation=cv2.INTER_AREA)
-        normalized_face = resized_face / 255.0
-        reshaped_face = np.reshape(normalized_face, (1, 48, 48, 1))
+        cv2.rectangle(processed_image, (x, y), (x + w, y + h), (36, 255, 12), 2)
+        face_roi = image[y:y + h, x:x + w]
+        face_resized = cv2.resize(face_roi, (224, 224))
+        face_normalized = face_resized.astype("float32") / 255.0
+        face_expanded = np.expand_dims(img_to_array(face_normalized), axis=0)
+        prediction = model.predict(face_expanded, verbose=0)[0]
+        emotion_idx = np.argmax(prediction)
+        emotion = emotion_labels[emotion_idx]
+        confidence = prediction[emotion_idx]
+        label = f"{emotion} ({confidence:.2f})"
+        cv2.putText(processed_image, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (36, 255, 12), 2)
+        results.append({'emotion': emotion, 'confidence': confidence, 'all_predictions': dict(zip(emotion_labels, prediction))})
+    return processed_image, results
 
-        # Predict emotion
-        prediction = model.predict(reshaped_face, verbose=0)[0]
-        emotion_index = np.argmax(prediction)
-        emotion = EMOTION_LABELS[emotion_index]
-        confidence = prediction[emotion_index]
-
-        # Draw on image
-        color = tuple(int(EMOTION_COLORS[emotion].lstrip('#')[i:i+2], 16) for i in (4, 2, 0)) # BGR for OpenCV
-        cv2.rectangle(color_image, (x, y), (x + w, y + h), color, 2)
-        cv2.putText(color_image, f"{emotion} ({confidence:.2f})", (x, y - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
-
-        results.append({
-            'emotion': emotion,
-            'confidence': confidence,
-            'bbox': (x, y, w, h),
-            'all_predictions': dict(zip(EMOTION_LABELS, prediction))
-        })
-    return color_image, results
-
-# --- UI Components ---
-def display_results(image, results):
-    """Displays the processed image and detailed results in tabs."""
-    if not results:
-        st.warning("No faces were detected in the image.")
-        return
-
-    tab_titles = ["Summary"] + [f"Face {i+1}" for i in range(len(results))]
-    tabs = st.tabs(tab_titles)
-
-    with tabs[0]:
-        st.subheader("Emotion Summary")
-        emotion_counts = pd.Series([res['emotion'] for res in results]).value_counts()
-        st.bar_chart(emotion_counts)
-
-    for i, result in enumerate(results):
-        with tabs[i+1]:
-            col1, col2 = st.columns([1, 2])
-            with col1:
-                st.subheader(f"Face {i+1}")
-                badge_color = EMOTION_COLORS.get(result['emotion'], '#808080')
-                st.markdown(f'<span class="emotion-badge" style="background-color:{badge_color};">{result["emotion"]}</span>', unsafe_allow_html=True)
-                st.write(f"**Confidence:** {result['confidence']:.2%}")
-
-            with col2:
-                st.subheader("Emotion Probabilities")
-                prob_df = pd.DataFrame.from_dict(result['all_predictions'], orient='index', columns=['Probability'])
-                prob_df = prob_df.sort_values(by='Probability', ascending=False)
-                st.dataframe(prob_df.style.format("{:.2%}"))
-
-def image_to_bytes(image):
-    """Converts a NumPy image to bytes for downloading."""
-    is_success, buffer = cv2.imencode(".png", cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
-    return buffer.tobytes()
-
-# --- Main App Logic ---
+# --- Main Application UI ---
 def main():
-    st.title("🎭 Advanced Emotion Recognition")
-    st.write("Upload an image and the AI will detect the emotions in each face.")
+    load_css()
+    st.title("🎭 Emotion Detection AI")
+    st.markdown("An interactive AI-powered application to analyze emotions from facial expressions.")
 
-    model = load_emotion_model()
+    if not TF_AVAILABLE:
+        st.error("❌ **TensorFlow is not installed.** The app cannot run without it.")
+        st.info("🔧 Please install TensorFlow in your environment: `pip install tensorflow`")
+        st.stop()
+        
+    model = load_model()
     face_classifier = load_face_classifier()
+    
+    if face_classifier is None:
+        st.error("❌ **`haarcascade_frontalface_default.xml` not found.** This file is required for face detection.")
+        st.stop()
 
-    if model is None or face_classifier is None:
-        st.error("🔴 Critical components failed to load. The app cannot proceed. Please check the logs.")
-        return
+    is_fallback = False
+    if model is None:
+        model = create_fallback_model()
+        is_fallback = True
+        st.warning("⚠️ **No trained model found.** Using an untrained fallback model for demonstration. Predictions will be random.")
+    else:
+        st.success("✅ **AI Model loaded successfully.** Real emotion detection is enabled.")
 
-    st.sidebar.title("🖼️ Input Options")
-    input_method = st.sidebar.radio("Choose how to provide an image:", ["Upload an Image", "Take a Photo"])
+    # --- Sidebar ---
+    st.sidebar.title("🚀 Options")
+    input_method = st.sidebar.selectbox("Choose input method:", ["Upload Image", "Take Photo", "Upload Multiple Images"])
+    st.sidebar.title("⚙️ Detection Parameters")
+    scale_factor = st.sidebar.slider("Scale Factor", 1.05, 1.4, 1.1, 0.05, help="Controls how much the image size is reduced at each scale. Smaller values find more faces but are slower.")
+    min_neighbors = st.sidebar.slider("Minimum Neighbors", 1, 10, 5, 1, help="Controls the sensitivity of detection. Higher values result in fewer, higher-quality detections.")
+    st.sidebar.info("🧠 **About the Model**\n\nThis app uses a deep learning model to recognize 7 human emotions. The face detection is performed using OpenCV's Haar Cascades.")
 
-    image_file = None
-    if input_method == "Upload an Image":
-        image_file = st.sidebar.file_uploader("Select an image", type=["jpg", "jpeg", "png"])
-    elif input_method == "Take a Photo":
-        image_file = st.sidebar.camera_input("Smile for the camera!")
+    # --- Main Content ---
+    if input_method == "Upload Image":
+        uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
+        if uploaded_file:
+            image = Image.open(uploaded_file)
+            process_and_display_image(image, uploaded_file.name, model, face_classifier, scale_factor, min_neighbors)
+    
+    elif input_method == "Take Photo":
+        picture = st.camera_input("Take a single picture")
+        if picture:
+            image = Image.open(picture)
+            process_and_display_image(image, "webcam_capture.png", model, face_classifier, scale_factor, min_neighbors)
+            
+    elif input_method == "Upload Multiple Images":
+        handle_batch_upload(model, face_classifier, scale_factor, min_neighbors)
 
-    if image_file:
-        original_image = Image.open(image_file).convert("RGB")
+    # --- Footer ---
+    st.markdown('<div class="footer">Developed with ❤️ using Streamlit & TensorFlow</div>', unsafe_allow_html=True)
+
+def handle_batch_upload(model, face_classifier, scale_factor, min_neighbors):
+    uploaded_files = st.file_uploader("Choose multiple images...", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
+    
+    if 'batch_results' not in st.session_state:
+        st.session_state.batch_results = []
+
+    if uploaded_files:
+        st.session_state.batch_results = [] # Reset on new upload
+        with st.spinner("Processing all images... This may take a moment."):
+            for f in uploaded_files:
+                image = Image.open(f)
+                processed_image, results = detect_emotion(image, model, face_classifier, scale_factor, min_neighbors)
+                st.session_state.batch_results.append({'name': f.name, 'image': image, 'processed': processed_image, 'results': results})
+
+    if st.session_state.batch_results:
+        st.header("📦 Batch Processing Results")
         
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader("Original Image")
-            st.image(original_image, use_container_width=True)
-
-        with st.spinner("Analyzing emotions..."):
-            processed_image, results = detect_emotions(original_image, model, face_classifier)
-
-        with col2:
-            st.subheader("Processed Image")
-            st.image(processed_image, use_container_width=True)
-            st.download_button(
-                label="📥 Download Processed Image",
-                data=image_to_bytes(processed_image),
-                file_name="emotion_analysis.png",
-                mime="image/png"
-            )
+        # --- Emotion Filtering ---
+        all_detected_emotions = set(res['emotion'] for item in st.session_state.batch_results for res in item['results'])
+        if all_detected_emotions:
+            selected_emotions = st.multiselect("Filter by Emotion:", sorted(list(all_detected_emotions)), default=sorted(list(all_detected_emotions)))
         
-        st.divider()
-        display_results(processed_image, results)
+        # --- Display Filtered Results ---
+        filtered_items = [
+            item for item in st.session_state.batch_results 
+            if any(res['emotion'] in selected_emotions for res in item['results'])
+        ] if all_detected_emotions else st.session_state.batch_results
 
-    st.markdown("---")
-    st.markdown('<footer>Built with ❤️ using Streamlit and TensorFlow.</footer>', unsafe_allow_html=True)
+        for item in filtered_items:
+            with st.expander(f"Results for: {item['name']}", expanded=False):
+                process_and_display_image(item['image'], item['name'], model, face_classifier, scale_factor, min_neighbors, is_batch_item=True, processed_data=item)
+        
+        # --- Aggregated Summary ---
+        st.header("📊 Aggregated Emotion Summary")
+        all_emotions = [res['emotion'] for item in filtered_items for res in item['results']]
+        if all_emotions:
+            emotion_counts = Counter(all_emotions)
+            summary_df = pd.DataFrame(emotion_counts.items(), columns=['Emotion', 'Count'])
+            st.bar_chart(summary_df.set_index('Emotion'))
+        else:
+            st.info("No emotions detected in the filtered set.")
 
+def process_and_display_image(image, caption, model, face_classifier, scale_factor, min_neighbors, is_batch_item=False, processed_data=None, display_summary=True):
+    col1, col2 = st.columns(2)
+    with col1:
+        st.image(image, caption=f"Original: {caption}", use_container_width=True)
+
+    if not is_batch_item:
+        with st.spinner("Detecting emotions..."):
+            processed_image_np, results = detect_emotion(image, model, face_classifier, scale_factor, min_neighbors)
+    else:
+        processed_image_np, results = processed_data['processed'], processed_data['results']
+
+    with col2:
+        st.image(processed_image_np, caption=f"Processed: {caption}", use_container_width=True)
+
+    if results:
+        summary_tab, *face_tabs = st.tabs(["📊 Summary", *[f"Face {i+1}" for i in range(len(results))]])
+        
+        with summary_tab:
+            st.subheader("Emotion Overview")
+            for i, result in enumerate(results):
+                badge_color = EMOTION_COLORS.get(result['emotion'], '#808080')
+                st.markdown(f"**Face {i+1}:** <span class='emotion-badge' style='background-color:{badge_color}'>{result['emotion']}</span> (Confidence: {result['confidence']:.2f})", unsafe_allow_html=True)
+        
+        for i, (tab, result) in enumerate(zip(face_tabs, results)):
+            with tab:
+                prob_df = pd.DataFrame(result['all_predictions'].items(), columns=['Emotion', 'Probability'])
+                st.bar_chart(prob_df.set_index('Emotion'))
+
+        # --- Download Buttons ---
+        buf = io.BytesIO()
+        Image.fromarray(processed_image_np).save(buf, format="PNG")
+        st.download_button(label="📥 Download Annotated Image", data=buf.getvalue(), file_name=f"annotated_{caption}.png", mime="image/png")
+    
+    elif image is not None:
+        st.warning("No faces were detected in this image.")
+    
+    return processed_image_np, results
 
 if __name__ == "__main__":
     main()
