@@ -1,6 +1,8 @@
-streamlit
-pandas
-numpy
-opencv-python
-tensorflow
-Pillow
+streamlit==1.20.0
+tensorflow-intel==2.11.0
+tensorflow==2.11.0
+keras==2.11.0
+numpy==1.26.4
+Pillow==9.5.0
+opencv-python==4.8.0.76
+protobuf==3.19.6
