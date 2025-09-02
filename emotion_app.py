@@ -75,8 +75,8 @@ st.markdown("""
 
 
 # --- Model and Classifier Loading ---
-# NEW MODEL: This is a publicly available model compatible with modern TensorFlow.
-MODEL_URL = "https://github.com/drishtimittal/Facial-Emotion-Recognition/raw/main/model.h5"
+# NEW, WORKING MODEL URL
+MODEL_URL = "https://github.com/git-chin/fer2013/raw/main/model.h5"
 MODEL_PATH = "emotion_model.h5"
 FACE_CLASSIFIER_PATH = 'haarcascade_frontalface_default.xml'
 
